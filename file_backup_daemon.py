@@ -2,9 +2,9 @@
 from argparse import ArgumentParser
 from collections import defaultdict
 from functools import partial
-from os import listdir, walk, chdir, makedirs, devnull, PathLike
-from os.path import isfile, getmtime, abspath, splitext, getsize, join as join_path
-from shutil import copy2
+from os import listdir, walk, chdir, mkdir, devnull, PathLike
+from os.path import isfile, isdir, getmtime, abspath, dirname, splitext, getsize, join as join_path
+from shutil import copy2, copystat
 from time import sleep, time
 from typing import Union, NoReturn, Callable, Iterator, Generator, Dict
 
@@ -18,12 +18,30 @@ def rec_file_iter(backup_dir: Union[PathLike, str]) -> Generator[str, None, None
     Yields:
         relative paths to files
     """
-    for (folder_name, _, file_names) in walk('.'):
-        if file_names:
-            dir_to_save = join_path(backup_dir, folder_name)
-            makedirs(dir_to_save, exist_ok=True)
-            for file_name in file_names:
-                yield join_path(folder_name[2:], file_name)
+    for (folder_name, _, file_names) in sorted(walk('.')):
+        dir_to_save = join_path(backup_dir, folder_name[2:])
+        if not isdir(dir_to_save):
+            mkdir(dir_to_save)
+            copystat(folder_name, dir_to_save)
+        for file_name in file_names:
+            yield join_path(folder_name[2:], file_name)
+    copystat('.', backup_dir)
+
+
+def _rsync_files(scr_file: Union[str, PathLike], dest_file: Union[str, PathLike]) -> None:
+    """Copies a file from 'src_file' to 'dest_file'. 'dest_file' should not be located in the ``cwd``.
+
+    Args:
+        scr_file:   source file
+        dest_file:  destination file
+    Returns:
+        None
+    """
+    copy2(scr_file, dest_file)
+    src_folder = dirname(scr_file)
+    if not src_folder:
+        src_folder = '.'
+    copystat(src_folder, dirname(dest_file))
 
 
 def main(dir_to_monitor: Union[PathLike, str],
@@ -34,8 +52,8 @@ def main(dir_to_monitor: Union[PathLike, str],
     """Tracks changes to files inside 'dir_to_monitor' and creates their backups.
 
     Args:
-        dir_to_monitor:  tracking directory
-        backup_dir:      absolute path to backup folder
+        dir_to_monitor:  tracking folder
+        backup_dir:      backup folder
         refresh_rate:    time in seconds after which the information about the tracked files is being updated
         logfile:         logfile
         recursive:       track files inside child directories
@@ -45,8 +63,7 @@ def main(dir_to_monitor: Union[PathLike, str],
     backup_dir = abspath(backup_dir)
     _bdir_len_p1 = len(backup_dir) + 1
 
-    makedirs(backup_dir, exist_ok=True)
-    file_change_time: Dict[str, Union[int, float]] = defaultdict(int)
+    last_change_time: Dict[str, Union[int, float]] = defaultdict(int)
     if recursive:
         file_getter: Callable[[], Iterator[str]] = partial(rec_file_iter, backup_dir)
     else:
@@ -59,18 +76,22 @@ def main(dir_to_monitor: Union[PathLike, str],
         log.write(f'Source[{abspath(dir_to_monitor)}]\tDestination[{backup_dir}]\n')
         chdir(dir_to_monitor)
         while True:
-            for file_name in file_getter():
-                time_change = getmtime(file_name)
-                if time_change > file_change_time[file_name]:
-                    stem, extension = splitext(file_name)
-                    backup_name = join_path(
+            for file in file_getter():
+                change_time = getmtime(file)
+                if change_time > last_change_time[file]:
+                    stem, extension = splitext(file)
+                    backup_file = join_path(
                         backup_dir,
-                        f'{stem}_{time_change:.0f}{extension}'
+                        f'{stem}_{change_time:.0f}{extension}'
                     )
                     time_stamp = time()
-                    copy2(file_name, backup_name)
-                    file_change_time[file_name] = time_stamp
-                    log.write(f'{file_name}\t{backup_name[_bdir_len_p1:]}\n')
+                    try:
+                        _rsync_files(file, backup_file)
+                    except KeyboardInterrupt:
+                        _rsync_files(file, backup_file)
+                        raise
+                    last_change_time[file] = time_stamp
+                    log.write(f'{file}\t{backup_file[_bdir_len_p1:]}\n')
             sleep(refresh_rate)
 
 
