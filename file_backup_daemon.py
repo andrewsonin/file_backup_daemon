@@ -2,8 +2,8 @@
 from argparse import ArgumentParser
 from collections import defaultdict
 from functools import partial
-from os import listdir, walk, chdir, mkdir, devnull, PathLike
-from os.path import isfile, isdir, getmtime, abspath, dirname, splitext, getsize, join as join_path
+from os import listdir, walk, chdir, mkdir, makedirs, devnull, PathLike
+from os.path import isfile, isdir, samefile, getmtime, abspath, dirname, splitext, getsize, join as join_path
 from shutil import copy2, copystat
 from time import sleep, time
 from typing import Union, NoReturn, Callable, Iterator, Generator, Dict
@@ -125,6 +125,15 @@ if __name__ == '__main__':
     refresh_rate = args.refresh_rate
     backup_dir = args.backup_dir
     recursive = args.recursive
+
+    try:
+        makedirs(backup_dir)
+    except FileExistsError as e:
+        raise FileExistsError(f"'backup_dir' ({backup_dir}) should not already exist") from e
+
+    if samefile(dir_to_monitor, backup_dir):
+        raise ValueError(f"'dir_to_monitor' and 'backup_dir' ({backup_dir}) should be different")
+
     del parser, args
 
     main(dir_to_monitor, backup_dir, refresh_rate, log_file, recursive)
