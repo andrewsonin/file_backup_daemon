@@ -48,6 +48,7 @@ def main(dir_to_monitor: Union[PathLike, str],
          backup_dir: Union[PathLike, str],
          refresh_rate: Union[int, float] = 1,
          logfile: Union[PathLike, str] = devnull,
+         rewrite_log: bool = False,
          recursive: bool = False) -> NoReturn:
     """Tracks changes to files inside 'dir_to_monitor' and creates their backups.
 
@@ -56,6 +57,7 @@ def main(dir_to_monitor: Union[PathLike, str],
         backup_dir:      backup folder
         refresh_rate:    time in seconds after which the information about the tracked files is being updated
         logfile:         logfile
+        rewrite_log:     rewrite log files instead of appending
         recursive:       track files inside child directories
     Returns:
         NoReturn. Stop using KeyboardInterrupt is expected
@@ -70,7 +72,7 @@ def main(dir_to_monitor: Union[PathLike, str],
         def file_getter():
             return filter(isfile, listdir())
 
-    with open(logfile, 'a') as log:
+    with open(logfile, 'w' if rewrite_log else 'a') as log:
         if getsize(logfile):
             log.write('\n')
         log.write(f'Source[{abspath(dir_to_monitor)}]\tDestination[{backup_dir}]\n')
@@ -117,6 +119,10 @@ if __name__ == '__main__':
         '--recursive', action='store_true', dest='recursive',
         help='Track files inside child directories as well'
     )
+    parser.add_argument(
+        '--rewrite_log', action='store_true', dest='rewrite_log',
+        help="Rewrite logfile instead of appending. Specifying '-o' required"
+    )
     args = parser.parse_args()
 
     dir_to_monitor = args.dir_to_monitor
@@ -125,6 +131,10 @@ if __name__ == '__main__':
     refresh_rate = args.refresh_rate
     backup_dir = args.backup_dir
     recursive = args.recursive
+    rewrite_log = args.rewrite_log
+
+    if rewrite_log and log_file == devnull:
+        raise TypeError("Option '--rewrite_log' requires '-o' specification")
 
     try:
         makedirs(backup_dir)
@@ -136,4 +146,4 @@ if __name__ == '__main__':
 
     del parser, args
 
-    main(dir_to_monitor, backup_dir, refresh_rate, log_file, recursive)
+    main(dir_to_monitor, backup_dir, refresh_rate, log_file, rewrite_log, recursive)
