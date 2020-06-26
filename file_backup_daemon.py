@@ -94,6 +94,7 @@ def main(dir_to_monitor: Union[PathLike, str],
                         raise
                     last_change_time[file] = time_stamp
                     log.write(f'{file}\t{backup_file[_bdir_len_p1:]}\n')
+            log.flush()
             sleep(refresh_rate)
 
 
