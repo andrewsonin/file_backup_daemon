@@ -19,12 +19,13 @@ def rec_file_iter(backup_dir: Union[PathLike, str]) -> Generator[str, None, None
         relative paths to files
     """
     for (folder_name, _, file_names) in sorted(walk('.')):
-        dir_to_save = join_path(backup_dir, folder_name[2:])
+        folder_name = folder_name[2:]  # ./some_name -> some_name
+        dir_to_save = join_path(backup_dir, folder_name)
         if not isdir(dir_to_save):
             mkdir(dir_to_save)
             copystat(folder_name, dir_to_save)
         for file_name in file_names:
-            yield join_path(folder_name[2:], file_name)
+            yield join_path(folder_name, file_name)
     copystat('.', backup_dir)
 
 
