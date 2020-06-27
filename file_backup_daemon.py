@@ -29,17 +29,17 @@ def rec_file_iter(backup_dir: Union[PathLike, str]) -> Generator[str, None, None
     copystat('.', backup_dir)
 
 
-def _rsync_files(scr_file: Union[str, PathLike], dest_file: Union[str, PathLike]) -> None:
-    """Copies a file from 'src_file' to 'dest_file'. 'dest_file' should not be located in the ``cwd``.
+def rsync_files(src_file: Union[str, PathLike], dest_file: Union[str, PathLike]) -> None:
+    """Copies a file from 'src_file' to 'dest_file'. 'dest_file' should not be equal to ".".
 
     Args:
-        scr_file:   source file
+        src_file:   source file
         dest_file:  destination file
     Returns:
         None
     """
-    copy2(scr_file, dest_file)
-    src_folder = dirname(scr_file)
+    copy2(src_file, dest_file)
+    src_folder = dirname(src_file)
     if not src_folder:
         src_folder = '.'
     copystat(src_folder, dirname(dest_file))
@@ -89,9 +89,9 @@ def main(dir_to_monitor: Union[PathLike, str],
                     )
                     time_stamp = time()
                     try:
-                        _rsync_files(file, backup_file)
+                        rsync_files(file, backup_file)
                     except KeyboardInterrupt:
-                        _rsync_files(file, backup_file)
+                        rsync_files(file, backup_file)
                         raise
                     last_change_time[file] = time_stamp
                     log.write(f'{file}\t{backup_file[_bdir_len_p1:]}\n')
