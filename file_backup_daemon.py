@@ -4,17 +4,20 @@ from collections import defaultdict
 from functools import partial
 from os import listdir, walk, chdir, mkdir, makedirs, devnull, PathLike
 from os.path import isfile, isdir, samefile, getmtime, abspath, dirname, splitext, getsize, join as join_path
+from re import match, compile as re_compile
 from shutil import copy2, copystat
 from time import sleep, time
 from typing import Union, NoReturn, Callable, Iterator, Generator, Dict
 
 
-def rec_file_iter(backup_dir: Union[PathLike, str]) -> Generator[str, None, None]:
+def rec_file_iter(backup_dir: Union[PathLike, str],
+                  filtering_rule: Callable[[Union[str, PathLike]], Union[str, PathLike]]) -> Generator[str, None, None]:
     """Yields files from the ``cwd`` recursively.
     Creates the same non-empty directory structure in 'backup_dir' as in ``cwd``.
 
     Args:
-        backup_dir:  folder to save backups to
+        backup_dir:      folder to save backups to
+        filtering_rule:  rule to filter file base names
     Yields:
         relative paths to files
     """
@@ -24,7 +27,7 @@ def rec_file_iter(backup_dir: Union[PathLike, str]) -> Generator[str, None, None
         if not isdir(dir_to_save):
             mkdir(dir_to_save)
             copystat(folder_name, dir_to_save)
-        for file_name in file_names:
+        for file_name in filter(filtering_rule, file_names):
             yield join_path(folder_name, file_name)
     copystat('.', backup_dir)
 
@@ -47,6 +50,7 @@ def rsync_files(src_file: Union[str, PathLike], dest_file: Union[str, PathLike])
 
 def main(dir_to_monitor: Union[PathLike, str],
          backup_dir: Union[PathLike, str],
+         filtering_rule: Callable[[Union[PathLike, str]], bool],
          refresh_rate: Union[int, float] = 1,
          logfile: Union[PathLike, str] = devnull,
          rewrite_log: bool = False,
@@ -56,6 +60,7 @@ def main(dir_to_monitor: Union[PathLike, str],
     Args:
         dir_to_monitor:  tracking folder
         backup_dir:      backup folder
+        filtering_rule:  rule to filter file base names
         refresh_rate:    time in seconds after which the information about the tracked files is being updated
         logfile:         logfile
         rewrite_log:     rewrite log files instead of appending
@@ -68,10 +73,13 @@ def main(dir_to_monitor: Union[PathLike, str],
 
     last_change_time: Dict[str, Union[int, float]] = defaultdict(int)
     if recursive:
-        file_getter: Callable[[], Iterator[str]] = partial(rec_file_iter, backup_dir)
+        file_getter: Callable[[], Iterator[str]] = partial(rec_file_iter, backup_dir, filtering_rule)
     else:
         def file_getter():
-            return filter(isfile, listdir())
+            return filter(
+                lambda file_name: isfile(file_name) and filtering_rule(file_name),
+                listdir()
+            )
 
     with open(logfile, 'w' if rewrite_log else 'a') as log:
         if getsize(logfile):
@@ -118,6 +126,10 @@ if __name__ == '__main__':
         help='Path to logfile'
     )
     parser.add_argument(
+        '--exclude', metavar='REGEX', dest='exclude_patterns', type=str, nargs='*', default=(),
+        help='File basename patterns to exclude (Perl regexps only)'
+    )
+    parser.add_argument(
         '--recursive', action='store_true', dest='recursive',
         help='Track files inside child directories as well'
     )
@@ -132,6 +144,7 @@ if __name__ == '__main__':
 
     refresh_rate = args.refresh_rate
     backup_dir = args.backup_dir
+    exclude_patterns = args.exclude_patterns
     recursive = args.recursive
     rewrite_log = args.rewrite_log
 
@@ -146,6 +159,20 @@ if __name__ == '__main__':
     if samefile(dir_to_monitor, backup_dir):
         raise ValueError(f"'dir_to_monitor' and 'backup_dir' ({backup_dir}) should be different")
 
-    del parser, args
+    if exclude_patterns:
+        def filtering_rule(file_name: Union[str, PathLike]) -> bool:
+            return not exclude_match(file_name)
 
-    main(dir_to_monitor, backup_dir, refresh_rate, log_file, rewrite_log, recursive)
+
+        exclude_match = partial(
+            match,
+            re_compile('|'.join(f'({pattern})' for pattern in exclude_patterns))
+        )
+
+    else:
+        def filtering_rule(file_name: Union[str, PathLike]) -> bool:
+            return True
+
+    del parser, args, exclude_patterns
+
+    main(dir_to_monitor, backup_dir, filtering_rule, refresh_rate, log_file, rewrite_log, recursive)
