@@ -100,6 +100,7 @@ def main(dir_to_monitor: Union[PathLike, str],
                         rsync_files(file, backup_file)
                     except KeyboardInterrupt:
                         rsync_files(file, backup_file)
+                        log.write(f'{file}\t{backup_file[_bdir_len_p1:]}\n')
                         raise
                     last_change_time[file] = time_stamp
                     log.write(f'{file}\t{backup_file[_bdir_len_p1:]}\n')
