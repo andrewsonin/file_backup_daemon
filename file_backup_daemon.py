@@ -11,7 +11,7 @@ from typing import Union, NoReturn, Callable, Iterator, Generator, Dict
 
 
 def rec_file_iter(backup_dir: Union[PathLike, str],
-                  filtering_rule: Callable[[Union[str, PathLike]], Union[str, PathLike]]) -> Generator[str, None, None]:
+                  filtering_rule: Callable[[Union[str, PathLike]], bool]) -> Generator[str, None, None]:
     """Yields files from the ``cwd`` recursively.
     Creates the same non-empty directory structure in 'backup_dir' as in ``cwd``.
 
