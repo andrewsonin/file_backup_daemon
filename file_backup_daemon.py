@@ -3,10 +3,10 @@ from argparse import ArgumentParser
 from collections import defaultdict
 from functools import partial
 from os import listdir, walk, chdir, mkdir, makedirs, devnull, PathLike
-from os.path import isfile, isdir, samefile, getmtime, abspath, dirname, splitext, getsize, join as join_path
-from re import match, compile as re_compile
+from os.path import isfile, isdir, samefile, getmtime, getctime, abspath, dirname, getsize, join as join_path
+from re import Pattern, match, compile as re_compile
 from shutil import copy2, copystat
-from time import sleep, time
+from time import sleep, strftime
 from typing import Union, NoReturn, Callable, Iterator, Generator, Dict
 
 
@@ -71,14 +71,15 @@ def main(dir_to_monitor: Union[PathLike, str],
     backup_dir = abspath(backup_dir)
     _bdir_len_p1 = len(backup_dir) + 1
 
-    last_change_time: Dict[str, Union[int, float]] = defaultdict(int)
+    last_change_time: Dict[str, Union[int, float]] = defaultdict(lambda: -1)
     if recursive:
         file_getter: Callable[[], Iterator[str]] = partial(rec_file_iter, backup_dir, filtering_rule)
     else:
         def file_getter():
-            return filter(
-                lambda file_name: isfile(file_name) and filtering_rule(file_name),
-                listdir()
+            return (
+                file_name
+                for file_name in listdir()
+                if isfile(file_name) and filtering_rule(file_name)
             )
 
     with open(logfile, 'w' if rewrite_log else 'a') as log:
@@ -88,23 +89,33 @@ def main(dir_to_monitor: Union[PathLike, str],
         chdir(dir_to_monitor)
         while True:
             for file in file_getter():
-                change_time = getmtime(file)
-                if change_time > last_change_time[file]:
-                    stem, extension = splitext(file)
-                    backup_file = join_path(
-                        backup_dir,
-                        f'{stem}_{change_time:.0f}{extension}'
-                    )
-                    time_stamp = time()
-                    try:
-                        rsync_files(file, backup_file)
-                    except KeyboardInterrupt:
-                        rsync_files(file, backup_file)
+                source_mtime = getmtime(file)
+                target_ctime = last_change_time[file]
+                if source_mtime > target_ctime:
+                    history_dir = join_path(backup_dir, file)
+                    if target_ctime == -1 and not isdir(history_dir):
+                        mkdir(history_dir)
+                    else:
+                        target_ctime = max(
+                            getctime(join_path(history_dir, file)) for file in listdir(history_dir)
+                        )
+                        if target_ctime >= source_mtime:
+                            last_change_time[file] = target_ctime
+                            continue
+                    if source_mtime > target_ctime:
+                        last_change_time[file] = source_mtime
+                        backup_file = join_path(
+                            history_dir,
+                            strftime('%Y-%m-%d %H-%M-%S')
+                        )
+                        try:
+                            rsync_files(file, backup_file)
+                        except KeyboardInterrupt:
+                            rsync_files(file, backup_file)
+                            log.write(f'{file}\t{backup_file[_bdir_len_p1:]}\n')
+                            raise
                         log.write(f'{file}\t{backup_file[_bdir_len_p1:]}\n')
-                        raise
-                    last_change_time[file] = time_stamp
-                    log.write(f'{file}\t{backup_file[_bdir_len_p1:]}\n')
-            log.flush()
+                        log.flush()
             sleep(refresh_rate)
 
 
@@ -138,6 +149,10 @@ if __name__ == '__main__':
         '--rewrite_log', action='store_true', dest='rewrite_log',
         help="Rewrite logfile instead of appending. Specifying '-o' required"
     )
+    parser.add_argument(
+        '--force', action='store_true', dest='force',
+        help="Use existing directory as backup"
+    )
     args = parser.parse_args()
 
     dir_to_monitor = args.dir_to_monitor
@@ -153,7 +168,7 @@ if __name__ == '__main__':
         raise TypeError("Option '--rewrite_log' requires '-o' specification")
 
     try:
-        makedirs(backup_dir)
+        makedirs(backup_dir, exist_ok=args.force)
     except FileExistsError as e:
         raise FileExistsError(f"'backup_dir' ({backup_dir}) should not already exist") from e
 
@@ -162,13 +177,10 @@ if __name__ == '__main__':
 
     if exclude_patterns:
         def filtering_rule(file_name: Union[str, PathLike]) -> bool:
-            return not exclude_match(file_name)
+            return not match(regex, file_name)
 
 
-        exclude_match = partial(
-            match,
-            re_compile('|'.join(f'({pattern})' for pattern in exclude_patterns))
-        )
+        regex: Pattern = re_compile('|'.join(f'({pattern})' for pattern in exclude_patterns))
 
     else:
         def filtering_rule(file_name: Union[str, PathLike]) -> bool:
